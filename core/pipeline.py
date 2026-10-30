@@ -17,10 +17,12 @@ from pathlib import Path
 from core.config import Preset
 from core.encoders import SOFTWARE, global_args, graph_tail, video_codec_args
 from core.ffmpeg import Capabilities, FFmpegTools, MediaInfo
-from core.filtergraph import AUDIO_RATE, FilterGraph, fmt
+from core.filtergraph import AUDIO_RATE, FilterGraph, fmt, quote_path
 from core.timeline import TimelineMap, build_timeline
 from features.metadata import MetadataParams, metadata_args
 from features.music import MusicParams, mix_music, music_input_args, pick_track, roll_music, track_duration
+from features.subtitles import Cue, build_events, find_sidecar, load_sidecar, render_ass, render_srt
+from features.transcribe import transcribe
 from features.uniq import (
     UniqParams,
     output_fps,
@@ -31,6 +33,7 @@ from features.uniq import (
 )
 
 MIN_KEPT_SECONDS = 1.0
+SUBS_FILE = "subs.ass"  # written into the job work_dir, which is ffmpeg's cwd
 VIDEO_PAD_SECONDS = 1.0  # clone-pad slack so every concat piece is exactly its length
 
 
@@ -138,9 +141,15 @@ def plan_job(
         v_out, a_out = graph.multi(pieces, f"concat=n={len(pieces) // 2}:v=1:a=1", ["v", "a"])
     else:
         v_out, a_out = pieces
+    notes: dict[str, str] = {}
+    srt_text = ""
+    subs = _plan_subtitles(ctx, Path(info.path), timeline, target)
+    if subs:
+        sub_filter, notes["subtitles"], srt_text = subs
+        if sub_filter:
+            v_out = graph.one([v_out], [sub_filter], "v")
     v_out = graph.one([v_out], ["format=yuv420p", *graph_tail(ctx.encoder)], "v")
 
-    notes: dict[str, str] = {}
     music = _roll_music(ctx, rng, timeline.duration)
     if music:
         a_out = mix_music(graph, a_out, inputs.add(*music_input_args(music)), preset.music, music)
@@ -175,7 +184,38 @@ def plan_job(
         audio_bitrate_k=abr,
         timeline=timeline,
         notes=notes,
+        srt_text=srt_text,
     )
+
+
+def _subtitle_cues(ctx: JobContext, source: Path) -> tuple[list[Cue], str]:
+    settings = ctx.preset.subtitles
+    sidecar = find_sidecar(source)
+    if sidecar:
+        return load_sidecar(sidecar), sidecar.name
+    if settings.source == "auto":
+        return transcribe(source, settings.whisper_model, settings.language), f"whisper:{settings.whisper_model}"
+    return [], "нет файла субтитров"
+
+
+def _plan_subtitles(
+    ctx: JobContext, source: Path, timeline: TimelineMap, target: tuple[int, int],
+) -> tuple[str, str, str] | None:
+    """Return (filter or "", report note, srt text) or None when subtitles are off."""
+    settings = ctx.preset.subtitles
+    if not settings.enabled:
+        return None
+    ctx.caps.require_filter("ass", "Субтитры")
+    cues, note = _subtitle_cues(ctx, source)
+    events = build_events(cues, timeline, settings)
+    if not events:
+        return "", note if not cues else f"{note} (пусто после обрезки)", ""
+    (ctx.work_dir / SUBS_FILE).write_text(render_ass(events, settings, *target), encoding="utf-8")
+    sub_filter = f"ass=filename={SUBS_FILE}"
+    if settings.fonts_dir:
+        sub_filter += f":fontsdir={quote_path(str(Path(settings.fonts_dir).expanduser().resolve()))}"
+    srt_text = render_srt(events, settings) if settings.save_srt else ""
+    return sub_filter, note, srt_text
 
 
 def _roll_music(ctx: JobContext, rng: random.Random, out_duration: float) -> MusicParams | None:

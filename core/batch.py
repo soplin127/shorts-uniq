@@ -205,6 +205,8 @@ class BatchRunner:
                 if problems:
                     raise FFmpegError("проверка результата: " + "; ".join(problems))
             os.replace(part, final)
+            if plan.srt_text:
+                final.with_suffix(".srt").write_text(plan.srt_text, encoding="utf-8")
         finally:
             shutil.rmtree(work_dir, ignore_errors=True)
             part.unlink(missing_ok=True)

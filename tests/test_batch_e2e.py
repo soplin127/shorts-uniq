@@ -5,7 +5,14 @@ from dataclasses import replace
 import pytest
 
 from core.batch import BatchRunner
-from core.config import BatchSettings, EncoderSettings, MusicSettings, OutputSettings, Preset
+from core.config import (
+    BatchSettings,
+    EncoderSettings,
+    MusicSettings,
+    OutputSettings,
+    Preset,
+    SubtitleSettings,
+)
 from core.ffmpeg import FFmpegNotFound, locate_tools, probe, probe_raw
 from features.metadata import find_signatures
 
@@ -116,3 +123,20 @@ def test_music_loops_short_track_under_every_variant(tools, sources, tmp_path, r
         assert find_signatures(str(result.output)) == []
     longest = max(probe(tools, r.output).duration for r in results)
     assert longest > 1.5  # the 1 s track was looped to cover the longer clip
+
+
+def test_sidecar_subtitles_are_burned_and_exported(tools, tmp_path):
+    folder = tmp_path / "in"
+    folder.mkdir()
+    _make_clip(tools, folder / "talk.mp4", size="360x640", seconds=3, audio=True)
+    (folder / "talk.srt").write_text(
+        "1\n00:00:00,200 --> 00:00:02,500\nПривет, это тест субтитров\n", encoding="utf-8")
+    subs = SubtitleSettings(enabled=True, save_srt=True, highlight_current_word=True)
+    preset = replace(_preset(), subtitles=subs, output=OutputSettings(variants=1))
+
+    results = BatchRunner(tools, preset, [folder / "talk.mp4"], tmp_path / "out").run()
+
+    assert results[0].status == "done", results[0].error
+    srt = results[0].output.with_suffix(".srt").read_text(encoding="utf-8")
+    assert "Привет," in srt and "-->" in srt
+    assert find_signatures(str(results[0].output)) == []
