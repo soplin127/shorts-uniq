@@ -5,8 +5,8 @@ from dataclasses import replace
 import pytest
 
 from core.batch import BatchRunner
-from core.config import BatchSettings, EncoderSettings, OutputSettings, Preset
-from core.ffmpeg import FFmpegNotFound, locate_tools, probe
+from core.config import BatchSettings, EncoderSettings, MusicSettings, OutputSettings, Preset
+from core.ffmpeg import FFmpegNotFound, locate_tools, probe, probe_raw
 from features.metadata import find_signatures
 
 
@@ -95,3 +95,24 @@ def test_broken_source_fails_alone(tools, sources, tmp_path):
     results = BatchRunner(tools, _preset(), [broken, sources[0]], tmp_path / "out").run()
 
     assert [r.status for r in results] == ["failed", "failed", "done", "done"]
+
+
+@pytest.mark.parametrize("replace_audio", [False, True])
+def test_music_loops_short_track_under_every_variant(tools, sources, tmp_path, replace_audio):
+    music_dir = tmp_path / "music"
+    music_dir.mkdir()
+    subprocess.run([tools.ffmpeg, "-v", "error", "-f", "lavfi", "-i", "sine=f=220:d=1",
+                    "-c:a", "aac", str(music_dir / "loop.m4a")], check=True)
+    music = MusicSettings(enabled=True, path=str(music_dir), replace_audio=replace_audio)
+    preset = replace(_preset(), music=music, output=OutputSettings(variants=1))
+
+    results = BatchRunner(tools, preset, sources, tmp_path / "out").run()
+
+    assert [r.status for r in results] == ["done", "done"], [r.error for r in results]
+    for result in results:
+        streams = {s["codec_type"]: float(s["duration"])
+                   for s in probe_raw(tools, result.output)["streams"]}
+        assert streams["audio"] == pytest.approx(streams["video"], abs=0.1)
+        assert find_signatures(str(result.output)) == []
+    longest = max(probe(tools, r.output).duration for r in results)
+    assert longest > 1.5  # the 1 s track was looped to cover the longer clip

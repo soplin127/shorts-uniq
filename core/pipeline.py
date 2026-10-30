@@ -20,6 +20,7 @@ from core.ffmpeg import Capabilities, FFmpegTools, MediaInfo
 from core.filtergraph import AUDIO_RATE, FilterGraph, fmt
 from core.timeline import TimelineMap, build_timeline
 from features.metadata import MetadataParams, metadata_args
+from features.music import MusicParams, mix_music, music_input_args, pick_track, roll_music, track_duration
 from features.uniq import (
     UniqParams,
     output_fps,
@@ -139,6 +140,12 @@ def plan_job(
         v_out, a_out = pieces
     v_out = graph.one([v_out], ["format=yuv420p", *graph_tail(ctx.encoder)], "v")
 
+    notes: dict[str, str] = {}
+    music = _roll_music(ctx, rng, timeline.duration)
+    if music:
+        a_out = mix_music(graph, a_out, inputs.add(*music_input_args(music)), preset.music, music)
+        notes["music"] = music.note
+
     expected = timeline.duration
     if preview_seconds:
         expected = min(expected, preview_seconds)
@@ -167,4 +174,13 @@ def plan_job(
         crf=crf,
         audio_bitrate_k=abr,
         timeline=timeline,
+        notes=notes,
     )
+
+
+def _roll_music(ctx: JobContext, rng: random.Random, out_duration: float) -> MusicParams | None:
+    settings = ctx.preset.music
+    if not (settings.enabled and settings.path):
+        return None
+    track = pick_track(settings.path, rng)
+    return roll_music(settings, rng, track, track_duration(ctx.tools, str(track)), out_duration)
