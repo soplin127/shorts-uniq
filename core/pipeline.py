@@ -19,6 +19,15 @@ from core.encoders import SOFTWARE, global_args, graph_tail, video_codec_args
 from core.ffmpeg import Capabilities, FFmpegTools, MediaInfo
 from core.filtergraph import AUDIO_RATE, FilterGraph, fmt, quote_path
 from core.timeline import TimelineMap, build_timeline
+from features.ads import (
+    ClipAd,
+    OverlayAd,
+    apply_overlays,
+    clip_audio_filters,
+    clip_video_filters,
+    roll_clips,
+    roll_overlays,
+)
 from features.metadata import MetadataParams, metadata_args
 from features.music import MusicParams, mix_music, music_input_args, pick_track, roll_music, track_duration
 from features.subtitles import Cue, build_events, find_sidecar, load_sidecar, render_ass, render_srt
@@ -109,6 +118,47 @@ def _source_piece(
     return v, a
 
 
+def _clip_piece(
+    graph: FilterGraph,
+    inputs: InputList,
+    clip: ClipAd,
+    out_duration: float,
+    target: tuple[int, int],
+    fps: str,
+) -> tuple[str, str]:
+    """A spliced-in ad clip, letterboxed to the target size; no uniq effects."""
+    idx = inputs.add("-t", fmt(out_duration, 4), "-i", clip.info.path)
+    v = graph.one([f"{idx}:v:0"], clip_video_filters(target, fps) + _exact_length(out_duration), "v")
+    if clip.info.has_audio:
+        a = graph.one([f"{idx}:a:0"], clip_audio_filters(out_duration), "a")
+    else:
+        a = graph.one([], silence_filters(out_duration), "a")
+    return v, a
+
+
+def _concat_timeline(
+    graph: FilterGraph,
+    inputs: InputList,
+    info: MediaInfo,
+    uniq: UniqParams,
+    timeline: TimelineMap,
+    clips: list[ClipAd],
+    target: tuple[int, int],
+    fps: str,
+) -> tuple[str, str]:
+    pieces: list[str] = []
+    for seg in timeline.segments:
+        if seg.kind == "ad":
+            pieces += _clip_piece(graph, inputs, clips[seg.ad_index], seg.out_duration, target, fps)
+        else:
+            pieces += _source_piece(graph, inputs, info, uniq, seg.src_start, seg.src_end,
+                                    seg.out_duration, target, fps)
+    if len(pieces) == 2:
+        return pieces[0], pieces[1]
+    v, a = graph.multi(pieces, f"concat=n={len(pieces) // 2}:v=1:a=1", ["v", "a"])
+    return v, a
+
+
 def plan_job(
     ctx: JobContext,
     info: MediaInfo,
@@ -127,21 +177,24 @@ def plan_job(
     target = (preset.uniq.target_width, preset.uniq.target_height)
     fps = output_fps(uniq, info.fps_float)
     start, end = kept_window(info, uniq)
-    timeline = build_timeline(start, end, [], uniq.speed)
+    base_duration = (end - start) / uniq.speed  # ad slot times refer to the ad-free output
+    clips = roll_clips(ctx.tools, preset.ads, rng, base_duration)
+    insertions = [(start + c.at * uniq.speed, c.info.duration) for c in clips]
+    timeline = build_timeline(start, end, insertions, uniq.speed)
 
     graph = FilterGraph()
     inputs = InputList()
-    pieces: list[str] = []
-    for seg in timeline.segments:
-        v, a = _source_piece(graph, inputs, info, uniq, seg.src_start, seg.src_end,
-                             seg.out_duration, target, fps)
-        pieces += [v, a]
+    v_out, a_out = _concat_timeline(graph, inputs, info, uniq, timeline, clips, target, fps)
 
-    if len(pieces) > 2:
-        v_out, a_out = graph.multi(pieces, f"concat=n={len(pieces) // 2}:v=1:a=1", ["v", "a"])
-    else:
-        v_out, a_out = pieces
     notes: dict[str, str] = {}
+    overlays = roll_overlays(preset.ads, rng, timeline,
+                             lambda t: start + t * uniq.speed, base_duration)
+    if overlays:
+        _require_overlay_filters(ctx, overlays)
+        v_out = apply_overlays(graph, inputs.add, v_out, overlays, target[0], fps, ctx.work_dir)
+    if clips or overlays:
+        notes["ads"] = "; ".join(ad.note for ad in [*clips, *overlays])
+
     srt_text = ""
     subs = _plan_subtitles(ctx, Path(info.path), timeline, target)
     if subs:
@@ -186,6 +239,13 @@ def plan_job(
         notes=notes,
         srt_text=srt_text,
     )
+
+
+def _require_overlay_filters(ctx: JobContext, overlays: list[OverlayAd]) -> None:
+    if any(ov.kind == "text" for ov in overlays):
+        ctx.caps.require_filter("drawtext", "Текстовый баннер")
+    if any(ov.kind == "video" and ov.slot.chroma_key for ov in overlays):
+        ctx.caps.require_filter("chromakey", "Хромакей")
 
 
 def _subtitle_cues(ctx: JobContext, source: Path) -> tuple[list[Cue], str]:

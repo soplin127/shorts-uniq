@@ -6,6 +6,8 @@ import pytest
 
 from core.batch import BatchRunner
 from core.config import (
+    AdSettings,
+    AdSlot,
     BatchSettings,
     EncoderSettings,
     MusicSettings,
@@ -140,3 +142,41 @@ def test_sidecar_subtitles_are_burned_and_exported(tools, tmp_path):
     srt = results[0].output.with_suffix(".srt").read_text(encoding="utf-8")
     assert "Привет," in srt and "-->" in srt
     assert find_signatures(str(results[0].output)) == []
+
+
+def _top_band_luma(tools, video, at):
+    """Mean luma of a band near the top of the frame at ``at`` seconds."""
+    raw = subprocess.run(
+        [tools.ffmpeg, "-v", "error", "-ss", str(at), "-i", str(video), "-frames:v", "1",
+         "-vf", "crop=1080:40:0:60,format=gray", "-f", "rawvideo", "-"],
+        check=True, capture_output=True,
+    ).stdout
+    return sum(raw) / len(raw)
+
+
+def test_ad_clip_is_spliced_and_overlays_rendered(tools, tmp_path):
+    folder = tmp_path / "in"
+    folder.mkdir()
+    _make_clip(tools, folder / "main.mp4", size="360x640", seconds=3, audio=True)
+    ads_dir = tmp_path / "ads"
+    ads_dir.mkdir()
+    _make_clip(tools, ads_dir / "promo.mp4", size="640x360", seconds=2, audio=False)
+    subprocess.run([tools.ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i", "color=red:s=200x100",
+                    "-frames:v", "1", str(ads_dir / "logo.png")], check=True)
+    ads = AdSettings(enabled=True, slots=(
+        AdSlot(mode="clip", path=str(ads_dir / "promo.mp4"), at="0.5"),
+        AdSlot(mode="overlay", path=str(ads_dir / "logo.png"), at="0.6", duration=1.0, position="top"),
+        AdSlot(mode="overlay", text="Скидка 50%: сегодня", at="0.6", duration=1.0),
+    ))
+    preset = replace(_preset(), ads=ads, output=OutputSettings(variants=1))
+
+    results = BatchRunner(tools, preset, [folder / "main.mp4"], tmp_path / "out").run()
+
+    assert results[0].status == "done", results[0].error
+    out = results[0].output
+    streams = {s["codec_type"]: float(s["duration"]) for s in probe_raw(tools, out)["streams"]}
+    assert streams["video"] > 2.0 + 0.9  # the 2 s clip plus at least the kept source
+    assert abs(streams["video"] - streams["audio"]) < 0.1
+    assert _top_band_luma(tools, out, 1.5) < 30  # letterboxed landscape ad: black bars
+    report = next((tmp_path / "out").glob("report_*.csv")).read_text(encoding="utf-8")
+    assert "clip:promo.mp4@0.5s" in report and "image:logo.png" in report and "text:text" in report
