@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+out/
+*.part.mp4
+.uniq_state.json
+.DS_Store
+Thumbs.db

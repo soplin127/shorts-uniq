@@ -1,0 +1,161 @@
+{
+  "uniq": {
+    "resolution_enabled": true,
+    "target_width": 1080,
+    "target_height": 1920,
+    "scale_pct": {
+      "min": 2.0,
+      "max": 6.0
+    },
+    "zoom_pct": {
+      "min": 1.0,
+      "max": 4.0
+    },
+    "color_enabled": true,
+    "brightness": {
+      "min": -0.03,
+      "max": 0.03
+    },
+    "contrast": {
+      "min": 0.95,
+      "max": 1.07
+    },
+    "saturation": {
+      "min": 0.92,
+      "max": 1.1
+    },
+    "gamma": {
+      "min": 0.95,
+      "max": 1.05
+    },
+    "hue_deg": {
+      "min": -3.0,
+      "max": 3.0
+    },
+    "noise_enabled": false,
+    "noise_strength": {
+      "min": 2.0,
+      "max": 6.0
+    },
+    "vignette_enabled": false,
+    "vignette_angle": {
+      "min": 0.15,
+      "max": 0.4
+    },
+    "audio_enabled": true,
+    "volume_db": {
+      "min": 1.0,
+      "max": 3.0
+    },
+    "eq_enabled": true,
+    "eq_gain_db": {
+      "min": -2.0,
+      "max": 2.0
+    },
+    "pitch_enabled": true,
+    "pitch_pct": {
+      "min": -1.0,
+      "max": 1.0
+    },
+    "time_enabled": true,
+    "speed": {
+      "min": 0.97,
+      "max": 1.03
+    },
+    "trim_start": {
+      "min": 0.0,
+      "max": 0.3
+    },
+    "trim_end": {
+      "min": 0.0,
+      "max": 0.3
+    },
+    "fps_enabled": true,
+    "fps_choices": [
+      30.0,
+      29.97,
+      60.0
+    ],
+    "flip_enabled": false,
+    "flip_probability": 1.0
+  },
+  "encoder": {
+    "crf": {
+      "min": 18.0,
+      "max": 23.0
+    },
+    "preset": "veryfast",
+    "audio_bitrate_k": {
+      "min": 128.0,
+      "max": 192.0
+    },
+    "hwaccel": "auto",
+    "strip_encoder_sei": true
+  },
+  "metadata": {
+    "date_from": "",
+    "date_to": "",
+    "title_mode": "empty",
+    "neutral_titles": [
+      "video",
+      "clip",
+      "IMG",
+      "VID",
+      "New video"
+    ],
+    "verify": true
+  },
+  "music": {
+    "enabled": false,
+    "path": "",
+    "volume_db": -14.0,
+    "original_volume_db": 0.0,
+    "replace_audio": false,
+    "ducking": true,
+    "duck_ratio": 6.0,
+    "duck_threshold": 0.05,
+    "random_start": true,
+    "fade_in": 1.0,
+    "fade_out": 1.5
+  },
+  "subtitles": {
+    "enabled": false,
+    "source": "file",
+    "whisper_model": "small",
+    "language": "",
+    "font": "Arial",
+    "font_size": 72,
+    "bold": true,
+    "uppercase": false,
+    "primary_color": "#FFFFFF",
+    "highlight_color": "#FFE000",
+    "outline_color": "#000000",
+    "outline": 4.0,
+    "shadow": 2.0,
+    "position": "bottom",
+    "margin_v": 320,
+    "shorts_style": true,
+    "max_words": 3,
+    "highlight_current_word": false,
+    "save_srt": false,
+    "fonts_dir": ""
+  },
+  "ads": {
+    "enabled": false,
+    "slots": []
+  },
+  "output": {
+    "input_dir": "",
+    "recursive": false,
+    "output_dir": "",
+    "name_template": "IMG_{random4}_{date}",
+    "variants": 1
+  },
+  "batch": {
+    "workers": 0,
+    "seed": "",
+    "skip_existing": true,
+    "preview_seconds": 10.0,
+    "ffmpeg_path": ""
+  }
+}
