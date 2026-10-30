@@ -145,6 +145,7 @@ class MusicSettings:
 
 
 SUB_POSITIONS = ("bottom", "center", "top")
+WHISPER_MODELS = ("tiny", "base", "small", "medium", "large-v3")
 
 
 @dataclass(frozen=True)

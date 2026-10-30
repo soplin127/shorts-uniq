@@ -68,6 +68,13 @@ def default_workers() -> int:
     return max(1, (os.cpu_count() or 2) // 2)
 
 
+def format_eta(eta: float | None) -> str:
+    if eta is None:
+        return "--:--"
+    minutes, seconds = divmod(int(eta), 60)
+    return f"{minutes:02d}:{seconds:02d}"
+
+
 def job_rng(seed: str, job: Job) -> random.Random:
     if not seed:
         return random.Random()
